@@ -1,42 +1,40 @@
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
+  if (req.method === "POST") {
+    try {
+      const { text, chatHistory = [] } = req.body || {};
+      if (!text) {
+        return res.status(400).json({ error: "متن خالی است" });
+      }
 
-  const { message, history } = req.body;
+      // افزودن پیام جدید به تاریخچه چت
+      const newChatHistory = [...chatHistory, { role: "user", content: text }];
 
-  if (!message) {
-    return res.status(400).json({ error: "Message is required" });
-  }
+      const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-4", // استفاده از مدل گپ‌تی برای ارتباطات طبیعی و بهینه
+          messages: newChatHistory, // ارسال تاریخچه پیام‌ها
+        }),
+      });
 
-  try {
-    const apiKey = process.env.OPENAI_API_KEY;
+      const data = await openaiRes.json();
+      const answer = data.choices?.[0]?.message?.content?.trim() || "جوابی نگرفتم.";
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [
-          ...(history || []),
-          { role: "user", content: message },
-        ],
-      }),
-    });
-
-    const data = await response.json();
-
-    if (data.error) {
-      return res.status(500).json({ error: data.error.message });
+      // ارسال تاریخچه به همراه پاسخ به کاربر
+      return res.status(200).json({
+        ok: true,
+        answer,
+        chatHistory: [...newChatHistory, { role: "assistant", content: answer }],
+      });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ error: "server error" });
     }
-
-    res.status(200).json({
-      reply: data.choices[0].message.content,
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
   }
+
+  return res.status(405).json({ error: "Method not allowed" });
 }
