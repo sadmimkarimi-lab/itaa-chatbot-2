@@ -1,52 +1,36 @@
 // api/chat.js
 
-// --- تابع تمیز کردن متن خروجی برای نمایش مرتب در حباب چت ---
+// ——————— تمیز کردن متن خروجی ———————
 function cleanAnswer(text) {
-  if (!text || typeof text !== "string") {
-    return "نتوانستم پاسخی تولید کنم.";
-  }
+  if (!text || typeof text !== "string") return "نتوانستم پاسخی تولید کنم.";
 
   let t = text.trim();
+  t = t.replace(/\r\n/g, "\n");      // نرمال‌سازی
+  t = t.replace(/\n{3,}/g, "\n\n");  // محدودیت فاصله‌های خالی
 
-  // نرمال‌سازی خط‌ها
-  t = t.replace(/\r\n/g, "\n");
-
-  // حداکثر دو خط خالی پشت سر هم
-  t = t.replace(/\n{3,}/g, "\n\n");
-
-  // حذف فاصله‌های اضافه در انتهای هر خط
   const lines = t.split("\n").map((line) => line.replace(/\s+$/g, ""));
   return lines.join("\n");
 }
 
 export default async function handler(req, res) {
-  // برای تست سلامت با GET
-  if (req.method === "GET") {
-    return res.status(200).json({
-      ok: true,
-      message: "ChatGPT API آماده است 🚀",
-    });
-  }
-
-  // فقط POST را به عنوان درخواست اصلی قبول می‌کنیم
+  // فقط POST
   if (req.method !== "POST") {
-    return res.status(405).json({ ok: false, error: "Method not allowed" });
+    return res.status(200).send("OK");
   }
 
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    console.error("OPENAI_API_KEY تعریف نشده است.");
+    console.error("OPENAI_API_KEY تعریف نشده");
     return res
       .status(500)
       .json({ ok: false, error: "کلید OpenAI روی سرور تنظیم نشده است." });
   }
 
-  // پیام کاربر را از بدنه درخواست بخوانیم
-  // (چند حالت مختلف را پشتیبانی می‌کنیم)
+  // پیام ورودی
   const userMessage =
-    (req.body && req.body.text) || // برای وبهوک ایتا { text: "..." }
-    (req.body && req.body.message) || // برای فرانت خودت { message: "..." }
-    (req.body && req.body.message && req.body.message.text) ||
+    req.body?.text ||
+    req.body?.message ||
+    req.body?.message?.text ||
     null;
 
   if (!userMessage || typeof userMessage !== "string") {
@@ -56,67 +40,57 @@ export default async function handler(req, res) {
   }
 
   try {
-    // هر درخواست کاملاً مستقل است؛ هیچ حافظه‌ای بین پیام‌ها نگه نمی‌داریم
-    const response = await fetch(
-      "https://api.openai.com/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: [
-            {
-              role: "system",
-              content: `
-تو یک دستیار حرفه‌ای فارسی‌زبان هستی.
+    // ——————— ارسال به OpenAI ———————
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content: `
+تو یک دستیار فارسی‌زبان حرفه‌ای هستی.
 
-قوانین پاسخ‌گویی:
-- هر سؤال را مستقل در نظر بگیر؛ به پیام‌های قبلی دسترسی نداری.
-- فقط بر اساس همین پیام فعلی جواب بده.
-- کوتاه، واضح و کاربردی بنویس.
-- متن را تمیز و خوش‌خوان بنویس (پاراگراف‌بندی، خط‌های جدا بین بخش‌ها).
-- اگر مناسب بود، از بولت‌پوینت (با - در ابتدای خط) استفاده کن.
-- اگر سؤال چندبخشی است، مرحله‌به‌مرحله و منظم جواب بده.
-- لحن: محترمانه، صمیمی و حرفه‌ای.
-              `.trim(),
-            },
-            {
-              role: "user",
-              content: userMessage,
-            },
-          ],
-          temperature: 0.5,
-          max_tokens: 400,
-        }),
-      }
-    );
+قوانین:
+- هر سؤال را مستقل جواب بده (هیچ حافظه‌ای وجود ندارد).
+- فقط بر اساس همین پیام جواب بده.
+- ساده، واضح و تمیز بنویس.
+- اگر لازم بود بولت‌پوینت استفاده کن.
+- از توضیح اضافه و تکرار بی‌خودی جلوگیری کن.
+- اگر سؤال چند بخش داشت، مرحله‌ای پاسخ بده.
+- لحن دوستانه و محترمانه باشد.
+`.trim(),
+          },
+          {
+            role: "user",
+            content: userMessage,
+          },
+        ],
+        temperature: 0.5,
+        max_tokens: 400,
+      }),
+    });
 
     const data = await response.json();
 
     if (!response.ok) {
       console.error("OpenAI error:", data);
       const msg =
-        (data && data.error && data.error.message) ||
+        data?.error?.message ||
         "پاسخی از OpenAI دریافت نشد، لطفاً دوباره تلاش کنید.";
-      return res
-        .status(500)
-        .json({ ok: false, error: `خطا از سمت OpenAI: ${msg}` });
+      return res.status(500).json({ ok: false, error: msg });
     }
 
     const rawAnswer =
-      (data &&
-        data.choices &&
-        data.choices[0] &&
-        data.choices[0].message &&
-        data.choices[0].message.content) ||
+      data?.choices?.[0]?.message?.content ||
       "نتوانستم پاسخی تولید کنم، لطفاً دوباره تلاش کنید.";
 
     const answer = cleanAnswer(rawAnswer);
 
-    // خروجی استاندارد برای فرانت و وبهوک ایتا
     return res.status(200).json({ ok: true, answer });
   } catch (err) {
     console.error("Internal error:", err);
